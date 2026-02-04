@@ -1,3 +1,5 @@
+import { ImagePicker } from "../../components/Map";
+
 export const Home = () => {
-  return <div>hello, world.</div>;
+  return <ImagePicker />;
 };
