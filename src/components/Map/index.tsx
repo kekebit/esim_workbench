@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button } from "antd";
+import { Button, message } from "antd";
 
 export function ImagePicker() {
+  const [messageApi, contextHolder] = message.useMessage();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const pickImage = async () => {
     try {
@@ -20,11 +21,15 @@ export function ImagePicker() {
         const url = convertFileSrc(selected);
         setImageUrl(url);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error(e);
+      messageApi.error(`打开文件浏览器出错`);
+    }
   };
 
   return (
     <div>
+      {contextHolder}
       <Button color={"primary"} onClick={pickImage}>
         选择图片
       </Button>
