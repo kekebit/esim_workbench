@@ -1,0 +1,11 @@
+[package]
+name = "esim_workbench"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.33.3"
+egui_extras = { version = "0.33.3", features = ["all_loaders"] }
+image = { version = "0.25", features = ["jpeg", "png"] }
+env_logger = "0.11.8"
+rfd = "0.17.2"
