@@ -2,9 +2,8 @@ mod state;
 mod widgets;
 
 use crate::state::*;
-use crate::widgets::ImageViewer;
-use eframe::egui;
-use eframe::egui::{Align, Widget};
+use crate::widgets::*;
+use eframe::egui::{self, *};
 
 fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
@@ -32,6 +31,7 @@ struct MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        AboutWindow::new().ui(ctx, &mut self.app_state.show_about);
         egui::TopBottomPanel::top("top_panel")
             .default_height(32.)
             .show(ctx, |ui| {
@@ -55,7 +55,7 @@ impl eframe::App for MyApp {
             egui::SidePanel::left("left_panel")
                 .resizable(true)
                 .default_width(150.0)
-                .width_range(80.0..=200.0)
+                .width_range(120.0..=200.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading("Left Panel");

@@ -1,7 +1,4 @@
-use eframe::egui::{
-    Color32, ColorImage, Context, Pos2, Rect, Response, Sense, Stroke, StrokeKind, TextureHandle,
-    TextureOptions, Ui, Vec2,
-};
+use eframe::egui::*;
 use image::DynamicImage;
 
 #[derive(Clone)]
@@ -15,6 +12,7 @@ pub struct ImageViewer {
     initialized: bool,
     min_scale: f32,
     max_scale: f32,
+    mouse_pos: Pos2,
 }
 
 impl Default for ImageViewer {
@@ -27,7 +25,8 @@ impl Default for ImageViewer {
             offset: Default::default(),
             initialized: false,
             min_scale: 0.5,
-            max_scale: 5.0,
+            max_scale: 2.0,
+            mouse_pos: Default::default(),
         }
     }
 }
@@ -80,9 +79,7 @@ impl ImageViewer {
             self.initialized = true;
         }
 
-        let img_size = tex_size * self.scale;
-
-        // 分配一个可交互区域（整个窗口）
+        // 分配一个可交互区域（整个区域）
         let (rect, response) = ui.allocate_exact_size(available_rect, Sense::click_and_drag());
         // 拖拽平移
         if response.dragged() {
@@ -90,7 +87,6 @@ impl ImageViewer {
         }
         // 滚轮缩放（以鼠标为中心）
         self.handle_zoom(&response, rect, tex_size, ui);
-
         // 双击复位
         if response.double_clicked() {
             println!("Clicked on image viewer");
@@ -98,27 +94,56 @@ impl ImageViewer {
             self.offset = Vec2::ZERO;
         }
 
-        // 居中位置
+        let img_size = tex_size * self.scale;
         let center = rect.center() - img_size / 2.0;
-        let pos = center + self.offset;
+        let img_pos = center + self.offset;
+        let image_rect = Rect::from_min_size(img_pos, img_size);
 
-        // 绘制图片
-        let border_color = Color32::LIGHT_GRAY;
-        let border_width = 2.0;
-        let image_rect = Rect::from_min_size(pos, img_size);
+        let painter = ui.painter();
 
-        ui.painter().rect_stroke(
+        painter.rect_stroke(
             image_rect,
             8.0, // 圆角
-            Stroke::new(border_width, border_color),
+            Stroke::new(2.0, Color32::BLACK),
             StrokeKind::Outside,
         );
-        ui.painter().image(
+        painter.image(
             tex.id(),
             image_rect,
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
+
+        // 最后绘制表面上的鼠标旁的位置
+        if let Some(mouse_pos) = response.hover_pos() {
+            if image_rect.contains(mouse_pos) {
+                // 计算鼠标在图片rect中对应图片本身的位置（考虑缩放和偏移）
+                let uv = (mouse_pos - image_rect.min) / image_rect.size(); // 0~1
+                let mouse_pos_in_img = uv * tex_size;
+                // 绘制在实际鼠标右上角附近，以带有背景的label绘制
+
+                // === 要显示的文字 ===
+                let text = format!("x: {:.0}, y: {:.0}", mouse_pos_in_img.x, mouse_pos_in_img.y);
+
+                let font = FontId::monospace(12.0);
+                let text_color = Color32::WHITE;
+
+                // === 计算文字布局（不换行）===
+                let galley =
+                    ui.fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), text_color));
+
+                // === 背景框大小 ===
+                let padding = vec2(6.0, 4.0);
+                let bg_rect = Rect::from_min_size(
+                    mouse_pos + vec2(12.0, -galley.size().y - 8.0), // 右上角
+                    galley.size() + padding * 2.0,
+                );
+                // === 背景 ===
+                painter.rect_filled(bg_rect, 4.0, Color32::from_black_alpha(180));
+                // === 文字 ===
+                painter.galley(bg_rect.min + padding, galley, Color32::BLACK);
+            }
+        }
 
         response
     }
