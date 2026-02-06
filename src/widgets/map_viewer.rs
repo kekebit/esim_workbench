@@ -2,39 +2,48 @@ use eframe::egui::*;
 use image::DynamicImage;
 
 #[derive(Clone)]
-pub struct ImageViewer {
-    img_path: Option<String>,
-    texture: Option<TextureHandle>,
-    error: Option<String>,
-    //
-    scale: f32,
-    offset: Vec2,
-    initialized: bool,
-    min_scale: f32,
-    max_scale: f32,
-    mouse_pos: Pos2,
+struct ImageInfo {
+    img_path: String,
+    texture: TextureHandle,
 }
 
-impl Default for ImageViewer {
+#[derive(Clone, Debug, Default)]
+struct ViewState {
+    pub scale: f32,
+    pub offset: Vec2,
+    pub initialized: bool,
+    pub min_scale: f32,
+    pub max_scale: f32,
+}
+
+#[derive(Clone)]
+pub struct MapViewer {
+    /// image info ctx
+    image_info: Option<ImageInfo>,
+    /// image handle error
+    error: Option<String>,
+    /// view state
+    view_state: ViewState,
+}
+
+impl Default for MapViewer {
     fn default() -> Self {
         Self {
-            img_path: None,
-            texture: None,
+            image_info: None,
             error: None,
-            scale: 0.0,
-            offset: Default::default(),
-            initialized: false,
-            min_scale: 0.5,
-            max_scale: 2.0,
-            mouse_pos: Default::default(),
+            view_state: ViewState {
+                min_scale: 0.3,
+                max_scale: 2.0,
+                ..ViewState::default()
+            },
         }
     }
 }
 
-impl ImageViewer {
-    fn is_new_img(&self, img_path: &String) -> bool {
-        if let Some(inner_path) = self.img_path.as_ref()
-            && inner_path == img_path
+impl MapViewer {
+    fn is_new_img(&self, check_path: &String) -> bool {
+        if let Some(ImageInfo { img_path, .. }) = &self.image_info
+            && check_path == img_path
         {
             false
         } else {
@@ -48,9 +57,10 @@ impl ImageViewer {
         }
         if let Ok(dyn_img) = image::open(&img_path) {
             let color_image = dynamic_image_to_color_image(&dyn_img);
-            self.texture = Some(ctx.load_texture("preview", color_image, TextureOptions::LINEAR));
-            self.img_path = Some(img_path.clone());
-            self.error = None;
+            self.image_info = Some(ImageInfo {
+                img_path: img_path.clone(),
+                texture: ctx.load_texture("preview", color_image, TextureOptions::LINEAR),
+            });
         } else {
             self.error = Some("Error loading image, try another.".to_string());
         }
@@ -59,44 +69,31 @@ impl ImageViewer {
     pub fn ui(&mut self, ui: &mut Ui) {
         if let Some(error) = &self.error {
             ui.label(error);
-        } else if let Some(tex) = &self.texture {
-            let img_desc = self.img_path.clone().unwrap_or("img".to_string());
-            self.inner_ui(tex.clone(), ui)
-                .on_hover_text_at_pointer(img_desc);
+        } else if let Some(ImageInfo { texture, .. }) = &self.image_info {
+            self.map_canvas_ui(texture.clone(), ui);
         } else {
             ui.label("No image.");
         }
     }
 
-    fn inner_ui(&mut self, tex: TextureHandle, ui: &mut Ui) -> Response {
-        let available_rect = ui.available_size();
+    fn map_canvas_ui(&mut self, tex: TextureHandle, ui: &mut Ui) -> Response {
+        let canvas_size = ui.available_size();
         let tex_size = tex.size_vec2();
 
+        let mut view_state = self.view_state.clone();
         // 第一次进入时，自动 fit
-        if !self.initialized {
-            self.scale = fit_scale(tex_size, available_rect);
-            self.offset = Vec2::ZERO;
-            self.initialized = true;
+        if !view_state.initialized {
+            view_state.scale = fit_scale(&tex_size, &canvas_size);
+            view_state.offset = Vec2::ZERO;
+            view_state.initialized = true;
         }
-
         // 分配一个可交互区域（整个区域）
-        let (rect, response) = ui.allocate_exact_size(available_rect, Sense::click_and_drag());
-        // 拖拽平移
-        if response.dragged() {
-            self.offset += response.drag_delta();
-        }
-        // 滚轮缩放（以鼠标为中心）
-        self.handle_zoom(&response, rect, tex_size, ui);
-        // 双击复位
-        if response.double_clicked() {
-            println!("Clicked on image viewer");
-            self.scale = fit_scale(tex_size, available_rect);
-            self.offset = Vec2::ZERO;
-        }
+        let (rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
+        self.view_state = self.handle_view(view_state, (&response, rect), &tex_size, ui);
 
-        let img_size = tex_size * self.scale;
+        let img_size = tex_size * self.view_state.scale;
         let center = rect.center() - img_size / 2.0;
-        let img_pos = center + self.offset;
+        let img_pos = center + self.view_state.offset;
         let image_rect = Rect::from_min_size(img_pos, img_size);
 
         let painter = ui.painter();
@@ -148,31 +145,55 @@ impl ImageViewer {
         response
     }
 
-    fn handle_zoom(&mut self, response: &Response, rect: Rect, tex_size: Vec2, ui: &Ui) {
+    fn handle_view(
+        &self,
+        mut view_state: ViewState,
+        canvas_interaction_area: (&Response, Rect),
+        tex_size: &Vec2,
+        ui: &Ui,
+    ) -> ViewState {
+        let (canvas_resp, canvas_rect) = canvas_interaction_area;
+        // 拖拽平移
+        if canvas_resp.dragged() {
+            view_state.offset += canvas_resp.drag_delta();
+        }
+        // 处理缩放
         let scroll_delta_y = ui.input(|i| i.smooth_scroll_delta.y);
-
-        if scroll_delta_y != 1.0 && response.hovered() {
+        if scroll_delta_y != 1.0 && canvas_resp.hovered() {
             let zoom_factor = (scroll_delta_y * 0.001).exp();
 
-            let old_scale = self.scale;
-            let new_scale = (self.scale * zoom_factor).clamp(self.min_scale, self.max_scale);
+            let old_scale = view_state.scale;
+            let new_scale =
+                (view_state.scale * zoom_factor).clamp(view_state.min_scale, view_state.max_scale);
 
-            let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(rect.center());
+            let pointer = ui
+                .input(|i| i.pointer.hover_pos())
+                .unwrap_or(canvas_rect.center());
 
             // 图片左上角（缩放前）
-            let img_size = tex_size * old_scale;
-            let img_pos = rect.center() - img_size / 2.0 + self.offset;
+            let img_size = *tex_size * old_scale;
+            let img_pos = canvas_rect.center() - img_size / 2.0 + view_state.offset;
 
             // 鼠标在图片中的相对位置（0~1）
             let rel = (pointer - img_pos) / img_size;
 
             // 缩放后，重新计算 offset，使该点仍在鼠标下
-            let new_img_size = tex_size * new_scale;
+            let new_img_size = *tex_size * new_scale;
             let new_img_pos = pointer - rel * new_img_size;
 
-            self.offset += new_img_pos - img_pos;
-            self.scale = new_scale;
+            view_state.offset += new_img_pos - img_pos;
+            view_state.scale = new_scale;
         }
+
+        // 处理双击复位
+        // 双击复位
+        if canvas_resp.double_clicked() {
+            println!("Clicked on image viewer");
+            view_state.scale = fit_scale(tex_size, &canvas_rect.size());
+            view_state.offset = Vec2::ZERO;
+        }
+
+        view_state
     }
 }
 
@@ -191,8 +212,8 @@ fn dynamic_image_to_color_image(img: &DynamicImage) -> ColorImage {
     }
 }
 
-fn fit_scale(tex_size: Vec2, avail: Vec2) -> f32 {
-    let sx = avail.x / tex_size.x;
-    let sy = avail.y / tex_size.y;
+fn fit_scale(texture_size: &Vec2, canvas_size: &Vec2) -> f32 {
+    let sx = canvas_size.x / texture_size.x;
+    let sy = canvas_size.y / texture_size.y;
     sx.min(sy)
 }

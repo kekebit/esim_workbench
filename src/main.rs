@@ -26,7 +26,7 @@ fn main() -> eframe::Result {
 struct MyApp {
     app_state: AppState,
     layout_state: LayoutState,
-    img_viewer: ImageViewer,
+    img_viewer: MapViewer,
 }
 
 impl eframe::App for MyApp {
